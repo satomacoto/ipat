@@ -2,18 +2,11 @@ import logging
 import time
 import typing
 
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
+import bs4
+import urllib.parse
 
 logger = logging.getLogger(__name__)
-
-
-def get_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
-    return driver
 
 
 def get_keibajo(keibajo_code: str, kaisai_kai: int, kaisai_nichime: int):
@@ -32,56 +25,81 @@ def get_keibajo(keibajo_code: str, kaisai_kai: int, kaisai_nichime: int):
     return f"{kaisai_kai:0>2}{keibajo_code_name[keibajo_code]}{kaisai_nichime:0>2}"
 
 
-def login(driver: webdriver.Remote, userid: int, password: int, pars: int):
-    driver.get("https://g.ipat.jra.go.jp/")
-    driver.find_element(By.XPATH, "/html/body/form/p[2]/input").send_keys(userid)
-    driver.find_element(By.XPATH, "/html/body/form/p[4]/input").send_keys(password)
-    driver.find_element(By.XPATH, "/html/body/form/p[6]/input").send_keys(pars)
-    driver.find_element(By.XPATH, "/html/body/form/p[8]/input").click()
-    if driver.find_element(By.XPATH, "/html/body/header/p[2]").text == "【お客様へ】":
-        driver.find_element(By.XPATH, "/html/body/form/p/input").click()
-    return driver
+def login(userid: int, password: int, pars: int) -> requests.Response:
+    response = requests.get("https://g.ipat.jra.go.jp")
+    soup = bs4.BeautifulSoup(response.content.decode("euc-jp"), features="html.parser")
+
+    query = {"i": userid, "p": password, "r": pars}
+    for input in soup.select("input[type=hidden]"):
+        query[input.attrs["name"]] = input.attrs["value"]
+
+    # TODO: Skip お知らせ
+
+    url = "https://g.ipat.jra.go.jp/kw_020.cgi"
+    data = urllib.parse.urlencode(query)
+
+    response = requests.post(url, data=data)
+    response.raise_for_status()
+
+    return response
 
 
 def move_to_keibajo(
-    driver: webdriver.Remote, keibajo_code: str, kaisai_kai: int, kaisai_nichime: int
-):
-    keibajo = get_keibajo(keibajo_code, kaisai_kai, kaisai_nichime)
-    driver.find_element(By.XPATH, f'//input[contains(@value, "{keibajo}")]').click()
-    return driver
+    response: requests.Response, keibajo_code: str, kaisai_kai: int, kaisai_nichime: int
+) -> requests.Response:
+    kaisai = get_keibajo(keibajo_code, kaisai_kai, kaisai_nichime)
+
+    # 開催選択
+
+    soup = bs4.BeautifulSoup(response.content.decode("euc-jp"), features="html.parser")
+    submit = soup.select(f'input[value^="{kaisai}"]')[0]
+
+    query = {}
+    query[submit.attrs["name"]] = submit.attrs["value"]
+    for input in soup.select("form[name=jyou] input[type=hidden]"):
+        query[input.attrs["name"]] = input.attrs["value"]
+
+    url = "https://g.ipat.jra.go.jp/kw_050.cgi"
+    data = urllib.parse.urlencode(query)
+    response = requests.post(url, data=data)
+    response.raise_for_status()
+
+    return response
 
 
-def bet(driver: webdriver.Remote, codes: typing.List[str], total_amount: int):
+def bet(response: requests.Response, codes: typing.List[str]) -> requests.Response:
+    # 馬券コード入力
+
+    soup = bs4.BeautifulSoup(response.content.decode("euc-jp"), features="html.parser")
+
+    query = {}
     for i, code in enumerate(codes):
-        driver.find_elements(By.XPATH, '//input[@type="tel"]')[i].send_keys(code)
-    driver.find_element(By.XPATH, '//input[@value="入力終了"]').click()
-    # confirm
-    driver.find_element(By.XPATH, "/html/body/form/p[2]/input").send_keys(total_amount)
-    driver.find_element(By.XPATH, "/html/body/form/p[3]/input").click()
-    return driver
+        query[i] = code
+    for input in soup.select("form[name=tousend] input[type=hidden]"):
+        query[input.attrs["name"]] = input.attrs["value"]
 
+    url = "https://g.ipat.jra.go.jp/kw_060.cgi"
+    data = urllib.parse.urlencode(query)
+    response = requests.post(url, data=data)
+    response.raise_for_status()
 
-def deposit(driver: webdriver.Remote, amount: int, password: int):
-    driver.find_element(By.XPATH, "/html/body/form[2]/p/input").click()
-    driver.find_element(By.XPATH, '//*[@id="sokupat"]/form[1]/div/input').click()
-    driver.find_element(
-        By.XPATH, "/html/body/section[1]/form[1]/label/div/input"
-    ).send_keys(amount)
-    driver.find_element(By.XPATH, "/html/body/section[1]/form[1]/div[2]/input").submit()
-    driver.find_element(By.XPATH, '//*[@id="_pin1M"]').send_keys(password)
-    driver.find_element(By.XPATH, '//*[@id="main"]/form/div[4]/input').submit()
+    return response
 
+def confirm(response: requests.Response, total_amount: int) -> requests.Response:
+    # 注文確定
 
-def quit(driver: webdriver.Remote):
-    driver.close()
-    driver.quit()
+    soup = bs4.BeautifulSoup(response.content.decode("euc-jp"), features="html.parser")
 
+    query = {"s": total_amount}
+    for input in soup.select("form[name=touhyou] input[type=hidden]"):
+        query[input.attrs["name"]] = input.attrs["value"]
 
-def screenshot(driver: webdriver.Remote, filename: str):
-    w = driver.execute_script("return document.body.scrollWidth")
-    h = driver.execute_script("return document.body.scrollHeight")
-    driver.set_window_size(w, h)
-    driver.save_screenshot(filename)
+    url = "https://g.ipat.jra.go.jp/kw_070.cgi"
+    data = urllib.parse.urlencode(query)
+    response = requests.post(url, data=data)
+    response.raise_for_status()
+
+    return response
 
 
 def bet_codes(
@@ -101,30 +119,16 @@ def bet_codes(
     logger.info(f"codes: {codes}")
     logger.info(f"total_amount: {total_amount}")
     logger.info(f"dryrun: {dryrun}")
+
+    response = login(userid, password, pars)
+    response = move_to_keibajo(response, keibajo_code, kaisai_kai, kaisai_nichime)
+    response = bet(response, codes)
     if dryrun:
+        logger.info("dryrun: skip confirm")
         return
-    try:
-        driver = get_driver()
-        login(driver, userid, password, pars)
-        move_to_keibajo(driver, keibajo_code, kaisai_kai, kaisai_nichime)
-        bet(driver, codes, total_amount)
-        time.sleep(3)
-        logger.info("success to bet")
-    except Exception as e:
-        logger.info(e)
-        screenshot(driver, "error.png")
-    finally:
-        quit(driver)
-        logger.info("quit driver")
+    else:
+        response = confirm(response, total_amount)
 
+    time.sleep(3)
 
-def deposit_amount(userid: int, password: int, pars: int, amount: int):
-    try:
-        driver = get_driver()
-        login(driver, userid, password, pars)
-        deposit(driver, amount, password)
-    except Exception as e:
-        logger.info(e)
-        screenshot(driver, "error.png")
-    finally:
-        quit(driver)
+    logger.info("finished to bet")
