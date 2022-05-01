@@ -4,12 +4,15 @@ import typing
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 
 logger = logging.getLogger(__name__)
 
 
 def get_driver():
-    driver = webdriver.Remote("http://localhost:4444")
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
     return driver
 
 
