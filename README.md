@@ -1,4 +1,4 @@
-# ipatbot
+# ipat
 
 ## 必要環境
 
