@@ -29,11 +29,11 @@ def login(userid: int, password: int, pars: int) -> requests.Response:
     response = requests.get("https://g.ipat.jra.go.jp")
     soup = bs4.BeautifulSoup(response.content.decode("euc-jp"), features="html.parser")
 
+    # TODO: Skip お知らせ
+
     query = {"i": userid, "p": password, "r": pars}
     for input in soup.select("input[type=hidden]"):
         query[input.attrs["name"]] = input.attrs["value"]
-
-    # TODO: Skip お知らせ
 
     url = "https://g.ipat.jra.go.jp/kw_020.cgi"
     data = urllib.parse.urlencode(query)
@@ -84,6 +84,7 @@ def bet(response: requests.Response, codes: typing.List[str]) -> requests.Respon
     response.raise_for_status()
 
     return response
+
 
 def confirm(response: requests.Response, total_amount: int) -> requests.Response:
     # 注文確定
