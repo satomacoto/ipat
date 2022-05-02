@@ -1,8 +1,8 @@
 import datetime
 
-from ipatbot.baken import Baken
-from ipatbot.baken_syurui import BakenSyurui
-from ipatbot.bet import Bet
+from ipat.baken import Baken
+from ipat.baken_syurui import BakenSyurui
+from ipat.bet import Bet
 
 if __name__ == "__main__":
     bakens = [
